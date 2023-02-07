@@ -1,0 +1,20 @@
+OUTPUT_DIR: "efir/results"
+DEVICE: "cuda"
+DATA:
+  DATASET: "mnist"
+  TRAIN_DATALOADER:
+    batch_size: 64
+  TEST_DATALOADER:
+    batch_size: 128
+MODEL:
+  type: "ae"
+OPTIMIZER:
+  type: "adam"
+  lr: 0.001
+  weight_decay: 0.00001
+TRAINING_LOOP:
+  n_epochs: 10
+  validation_frequency: 5
+LOSS_WEIGHTS:
+  mse_loss: 1.0
+  regularization: 0.1
