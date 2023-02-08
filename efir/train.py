@@ -12,14 +12,12 @@ from yacs.config import CfgNode
 import os
 from efir.checkpointer import Checkpointer
 from tqdm import tqdm
+from typing import Optional
+import random
 
 
 setup_logger()
 
-
-n_epochs = 10
-validation_frequency = 5
-batch_size = 64
 logger = logging.getLogger()
 
 
@@ -38,7 +36,7 @@ def validate(model: nn.Module, cfg_node: CfgNode, test_epoch: int, device: str) 
 
         # Create the data loader
         test_loader = torch.utils.data.DataLoader(  # type: ignore
-            test_dataset, batch_size=batch_size, shuffle=False
+            test_dataset, batch_size=cfg.DATA.TEST_DATALOADER.batch_size, shuffle=False
         )
     total_val_loss = 0.0
     with CodeBlock(f"Running inference for {test_epoch=}", logger):
@@ -54,15 +52,24 @@ def validate(model: nn.Module, cfg_node: CfgNode, test_epoch: int, device: str) 
                 losses.values(),
                 torch.tensor(0, dtype=torch.float, device=device)
             )
+            log_kwargs = {  # log infrequently to limit bandwidth
+                "test/inputs_and_reconstructions": wandb.Image(
+                    torch.cat(
+                        (
+                            data.detach()[:viz_count, ...].cpu(),
+                            outputs["yhat"].detach()[:viz_count, ...].cpu(),
+                        ),
+                        dim=-1
+                    ),
+                    classes=[{"id": i, "name": x} for i, x in enumerate(labels.detach()[:viz_count].cpu().tolist())],  # type: ignore
+                ),
+            }
             wandb.log({
                 **({k: v.detach().cpu().item() for k, v in losses.items()}),
                 "test/total_loss": loss.detach().cpu().item(),
+                "test/batch_idx": batch_idx,
                 "test/epoch": test_epoch,
-                "inputs": wandb.Image(
-                    data.detach()[:viz_count, ...].cpu(),
-                    classes=[{"id": i, "name": x} for i, x in enumerate(labels.detach()[:viz_count].cpu().tolist())],  # type: ignore
-                ),
-                "recontructions": wandb.Image(outputs["yhat"].detach()[:viz_count, ...].cpu())
+                **log_kwargs,
             })
             total_val_loss += loss.detach().cpu().item()
     return total_val_loss
@@ -71,15 +78,20 @@ if __name__ == "__main__":
     # wandb.login()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="efir/configs/mnist_ae.yaml")
+    parser.add_argument("-lo", "--leave_out", type=int, default=None)
     args = parser.parse_args()
+    leave_out = args.leave_out
     cfg = load_config(args.config)
     device = cfg.DEVICE
     output_dir = cfg.OUTPUT_DIR
     cfg_dict = cfg_node_to_dict(cfg)
-
+    cfg_dict["leave_out"] = leave_out
     wandb.init(
         project="efir",
         config=cfg_dict,
+        group="efir_mnist",
+        tags=[f"leave_out_{leave_out}"],
+        # mode="offline",
         # TODO: set group
     )
     run_name = wandb.run.name  # type: ignore
@@ -107,12 +119,14 @@ if __name__ == "__main__":
         train_dataset = datasets.MNIST(
             root='./data', train=True, download=True, transform=transform
         )
-
+        if leave_out is not None:
+            indices = (train_dataset.targets != leave_out).nonzero().reshape(-1)
+            train_dataset = torch.utils.data.Subset(train_dataset, indices)
         # Create the data loader
         train_loader = torch.utils.data.DataLoader(  # type: ignore
-            train_dataset, batch_size=batch_size, shuffle=True
+            train_dataset, batch_size=cfg.DATA.TRAIN_DATALOADER.batch_size, shuffle=True
         )
-
+    n_batches = len(train_loader)
     # Invoke training
     with CodeBlock("Training Loop", logger):
         for epoch in range(n_epochs):
@@ -132,16 +146,24 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                log_kwargs = {  # log infrequently to limit bandwidth
+                    "inputs_and_reconstructions": wandb.Image(
+                        torch.cat(
+                            (
+                                data.detach()[:viz_count, ...].cpu(),
+                                outputs["yhat"].detach()[:viz_count, ...].cpu(),
+                            ),
+                            dim=-1
+                        ),
+                        classes=[{"id": i, "name": x} for i, x in enumerate(labels.detach()[:viz_count].cpu().tolist())],  # type: ignore
+                    ),
+                } if (batch_idx % (n_batches // validation_frequency)) == 0 else {}
                 wandb.log({
                     **({k: v.detach().cpu().item() for k, v in losses.items()}),
                     "total_loss": loss.detach().cpu().item(),
                     "epoch": epoch,
                     "batch": batch_idx,
-                    "inputs": wandb.Image(
-                        data.detach()[:viz_count, ...].cpu(),
-                        classes=[{"id": i, "name": x} for i, x in enumerate(labels.detach()[:viz_count].cpu().tolist())],  # type: ignore
-                    ),
-                    "recontructions": wandb.Image(outputs["yhat"].detach()[:viz_count, ...].cpu())
+                    **log_kwargs,
                 })
             ## Invoke validation
             if epoch % validation_frequency == 0:
@@ -163,3 +185,4 @@ if __name__ == "__main__":
             (n_epochs + 1),
             {"val_loss": val_loss}
         )
+    wandb.finish()
