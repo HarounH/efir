@@ -1,7 +1,7 @@
 import sys
 import logging
 from yacs.config import CfgNode
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from copy import deepcopy
 from datetime import datetime
 
@@ -46,3 +46,23 @@ class CodeBlock:
         tac = datetime.now()
         self.logger.info(f"Exiting {self.description} at {tac.strftime('%m/%d/%Y, %H:%M:%S')}; wall-time = {(tac-self.tic).total_seconds()}")
         return
+
+
+class DatasetDenoisingStats:
+    # TODO: refactor
+    mean: Dict[str, Tuple[float, ...]] = {
+        "MNIST": (0.1307,),
+        "FashionMNIST": (0.2860,),
+        "SVHN": (0.4377, 0.4438, 0.4728),
+        "CIFAR10": (0.4914, 0.4822, 0.4465),
+        "CIFAR100": (0.5071, 0.4866, 0.4409),
+        "Imagenet": (0.485, 0.456, 0.406),
+    }
+    std: Dict[str, Tuple[float, ...]] = {
+        "MNIST": (0.3081,),
+        "FashionMNIST": (0.3530,),
+        "SVHN": (0.1980, 0.2010, 0.1970),
+        "CIFAR10": (0.2470, 0.2435, 0.2616),
+        "CIFAR100": (0.2673, 0.2564, 0.2762),
+        "Imagenet": (0.229, 0.224, 0.225),
+    }
