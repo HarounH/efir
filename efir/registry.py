@@ -49,4 +49,5 @@ class AutoRegistrationBase(metaclass=Registry):
 # Register optimizers
 Registry.register("sgd", torch.optim.SGD)
 Registry.register("adam", torch.optim.Adam)
+Registry.register("CosineAnnealingWarmRestarts", torch.optim.lr_scheduler.CosineAnnealingWarmRestarts)
 # todo: register other stuff too

@@ -33,7 +33,7 @@ def validate(
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
-                transforms.Normalize((cfg.DATA.INPUT.mean,), (cfg.DATA.INPUT.std,)),
+                # transforms.Normalize((cfg.DATA.INPUT.mean,), (cfg.DATA.INPUT.std,)),
             ]
         )
 
@@ -121,6 +121,8 @@ if __name__ == "__main__":
     wandb.watch(model)
 
     optimizer = Registry.build_from_cfg(cfg.OPTIMIZER, params=model.parameters())
+    if use_scheduler := cfg.enable_scheduler:
+        scheduler = Registry.build_from_cfg(cfg.SCHEDULER, optimizer=optimizer)
     # Traditional training
     n_epochs = cfg.TRAINING_LOOP.n_epochs
     validation_frequency = cfg.TRAINING_LOOP.validation_frequency
@@ -172,6 +174,8 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                if use_scheduler:
+                    scheduler.step()
                 log_kwargs = (
                     {  # log infrequently to limit bandwidth
                         "inputs_and_reconstructions": wandb.Image(
