@@ -2,7 +2,7 @@ import torch
 from torchvision import datasets, transforms
 import argparse
 import wandb
-from efir.utils import CodeBlock, setup_logger, load_config, cfg_node_to_dict
+from efir.utils import CodeBlock, get_on_trace_ready, log_memories, setup_logger, load_config, cfg_node_to_dict
 import logging
 from efir.model.vae import VAE
 from efir.model.ae import AE
@@ -12,9 +12,11 @@ from yacs.config import CfgNode
 import os
 from efir.checkpointer import Checkpointer
 from tqdm import tqdm
-from typing import Optional
+from typing import Optional, Callable
 import random
 from torch.utils.data import Subset, DataLoader, Dataset
+from torch.profiler import profile,  record_function, ProfilerActivity
+
 
 setup_logger()
 
@@ -28,15 +30,23 @@ def validate(
     test_epoch: int,
     device: str,
     prefix: str = "test",
+    profile: bool = False,
 ) -> float:
-    with CodeBlock("initializing testing dataset and dataloader", logger):
+    with CodeBlock(
+        "initializing testing dataset and dataloader",
+        logger,
+        profile=profile,
+        profile_kwargs=CodeBlock.ProfileKwargs(
+            schedule=None,
+            on_trace_ready=get_on_trace_ready(f"{prefix}_{test_epoch}_test_dataset_creation"),
+        )
+    ):
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
                 # transforms.Normalize((cfg.DATA.INPUT.mean,), (cfg.DATA.INPUT.std,)),
             ]
         )
-
         # Download the training data and apply the transformations
         test_dataset = datasets.MNIST(
             root="./data", train=False, download=True, transform=transform
@@ -54,8 +64,18 @@ def validate(
         test_loader = DataLoader(  # type: ignore
             test_dataset, batch_size=cfg.DATA.TEST_DATALOADER.batch_size, shuffle=False
         )
+
+    log_memories({"test_dataset": test_dataset}, logger)
+
     total_val_loss = 0.0
-    with CodeBlock(f"Running inference for {test_epoch=}", logger):
+    with CodeBlock(
+        f"Running inference for {test_epoch=}",
+        logger,
+        profile=profile,
+        profile_kwargs=CodeBlock.ProfileKwargs(
+            on_trace_ready=get_on_trace_ready(f"{prefix}_{test_epoch}_inference"),
+        ),
+    ) as prof:
         for batch_idx, (data, labels) in enumerate(test_loader):
             data = data.to(device)
             outputs = model.losses(data)  # type: ignore
@@ -88,6 +108,8 @@ def validate(
                     **log_kwargs,
                 }
             )
+            if prof is not None:
+                prof.step()
             total_val_loss += loss.detach().cpu().item()
     return total_val_loss
 
@@ -157,7 +179,13 @@ if __name__ == "__main__":
         )
     n_batches = len(train_loader)
     # Invoke training
-    with CodeBlock("Training Loop", logger):
+    with CodeBlock(
+        "Training Loop",
+        logger,
+        profile=True,
+        profile_kwargs=CodeBlock.ProfileKwargs(
+            on_trace_ready=get_on_trace_ready(f"training_loop")),
+    ) as prof:
         for epoch in range(n_epochs):
             for batch_idx, (data, labels) in enumerate(tqdm(train_loader)):
                 # Do something with the data
@@ -201,15 +229,16 @@ if __name__ == "__main__":
                         **log_kwargs,
                     }
                 )
+                prof.step()
             ## Invoke validation
             if epoch % validation_frequency == 0:
                 with CodeBlock(f"Validating on {epoch=}", logger):
-                    val_loss = validate(model, cfg, test_epoch=epoch, device=device)
+                    val_loss = validate(model, cfg, test_epoch=epoch, device=device, profile=False)
                 with CodeBlock(f"Checkpointing on {epoch=}", logger):
                     checkpointer(model, epoch, {"val_loss": val_loss})
     # Invoke test
     with CodeBlock(f"Testing at the end", logger):
-        val_loss = validate(model, cfg, test_epoch=(n_epochs + 1), device=device)
+        val_loss = validate(model, cfg, test_epoch=(n_epochs + 1), device=device, profile=True)
 
     with CodeBlock(f"Testing Unseen class at the end", logger):
         val_loss = validate(model, cfg, test_epoch=(n_epochs + 1), device=device, prefix="unseen_test")

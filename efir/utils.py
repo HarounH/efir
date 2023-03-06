@@ -1,12 +1,20 @@
+from dataclasses import dataclass, field
 import sys
 import logging
 from yacs.config import CfgNode
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from copy import deepcopy
 from datetime import datetime
+from numbers import Number
+from collections import deque
+from collections.abc import Set, Mapping
+import numpy as np
+import torch
+from torch.profiler import profile,  record_function, ProfilerActivity
 
 
 logger = logging.getLogger()
+N_BYTES_IN_MB = 1024 * 1024
 
 
 def setup_logger() -> None:
@@ -32,19 +40,112 @@ def cfg_node_to_dict(cfg_node: CfgNode, key_list: List[str] = []) -> Dict[str, A
         return cfg_dict
 
 
+ZERO_DEPTH_BASES = (str, bytes, Number, range, bytearray)
+
+
+def get_size(obj_0: Any) -> int:
+    """ Recursively iterate to sum size of object & members.
+    reference: https://stackoverflow.com/questions/449560/how-do-i-determine-the-size-of-an-object-in-python
+    """
+    _seen_ids = set()
+    def inner(obj):
+        obj_id = id(obj)
+        if obj_id in _seen_ids:
+            return 0
+        _seen_ids.add(obj_id)
+        size = sys.getsizeof(obj)
+        if isinstance(obj, ZERO_DEPTH_BASES):
+            pass # bypass remaining control flow and return
+        elif isinstance(obj, np.ndarray):
+            return size + obj.nbytes
+        elif isinstance(obj, torch.Tensor):
+            return size + obj.nelement() * obj.element_size()
+        elif isinstance(obj, (tuple, list, Set, deque)):
+            size += sum(inner(i) for i in obj)
+        elif isinstance(obj, Mapping) or hasattr(obj, 'items'):
+            size += sum(inner(k) + inner(v) for k, v in getattr(obj, 'items')())
+        # Check for custom object instances - may subclass above too
+        if hasattr(obj, '__dict__'):
+            size += inner(vars(obj))
+        if hasattr(obj, '__slots__'): # can have __slots__ with __dict__
+            size += sum(inner(getattr(obj, s)) for s in obj.__slots__ if hasattr(obj, s))
+        return size
+    return inner(obj_0)
+
+
+def get_on_trace_ready(name: str) -> Callable:
+    def on_trace_ready(prof: profile):
+        logger.info(
+            prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+        )
+        prof.export_chrome_trace(f"./results/traces/{name}" + str(prof.step_num) + ".json")
+    return on_trace_ready
+
+
+def log_memories(objects_to_inspect: Dict[str, Any], logger: logging.Logger) -> None:
+    for k, v in objects_to_inspect.items():
+        logger.info(f"{k} -> {get_size(v) / N_BYTES_IN_MB:.4f} MB")
+
+
 class CodeBlock:
-    def __init__(self, description: str, logger: logging.Logger):
+    @dataclass
+    class ProfileKwargs:
+        on_trace_ready: Callable
+        schedule: Optional[Callable] = field(default_factory=lambda: torch.profiler.schedule(
+            wait=1,
+            warmup=1,
+            active=2,
+            repeat=1,
+        ))
+        activities: List[ProfilerActivity] = field(default_factory=lambda: [ProfilerActivity.CPU, ProfilerActivity.CUDA])
+        record_shapes: bool = True
+        profile_memory: bool = True
+
+    def __init__(
+        self,
+        description: str,
+        logger: logging.Logger,
+        profile: bool = False,
+        profile_kwargs: Optional[ProfileKwargs] = None,
+        objects_to_inspect: Optional[Dict[str, Any]] = None,
+    ):
         self.logger = logger
         self.description = description
+        self.profile = profile
+        self.profile_kwargs = profile_kwargs
+        self._profiler = None
+        self.objects_to_inspect = objects_to_inspect
 
     def __enter__(self):
+        if self.objects_to_inspect is not None:
+            log_memories(objects_to_inspect={f"start_{k}": v for k, v in self.objects_to_inspect.items()}, logger=logger)
+        if self.profile:
+            if self.profile_kwargs is None:
+                self.profile_kwargs = CodeBlock.ProfileKwargs(
+                    on_trace_ready=get_on_trace_ready(self.description.replace(" ", "_")[:64])
+                )
+
+            self._profiler = profile(
+                activities=self.profile_kwargs.activities,
+                record_shapes=self.profile_kwargs.record_shapes,
+                profile_memory=self.profile_kwargs.profile_memory,
+                schedule=self.profile_kwargs.schedule,
+                on_trace_ready=self.profile_kwargs.on_trace_ready,
+            )
+            self._profiler.start()
+        else:
+            self._profiler = None
         self.tic = datetime.now()
         self.logger.info(f"Entering {self.description} at {self.tic.strftime('%m/%d/%Y, %H:%M:%S')}")
-        return
+        return self._profiler
 
     def __exit__(self, ctx_type, ctx_value, ctx_traceback):
         tac = datetime.now()
         self.logger.info(f"Exiting {self.description} at {tac.strftime('%m/%d/%Y, %H:%M:%S')}; wall-time = {(tac-self.tic).total_seconds()}")
+        if self._profiler is not None:
+            self._profiler.stop()
+        if self.objects_to_inspect is not None:
+            log_memories(objects_to_inspect={f"end_{k}": v for k, v in self.objects_to_inspect.items()}, logger=logger)
         return
 
 
