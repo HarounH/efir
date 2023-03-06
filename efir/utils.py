@@ -78,13 +78,13 @@ def get_on_trace_ready(name: str) -> Callable:
         logger.info(
             prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
         )
-        prof.export_chrome_trace(f"./results/traces/{name}" + str(prof.step_num) + ".json")
+        prof.export_chrome_trace(f"./results/traces/{name}" + str(prof.step_num) + ".pt.trace.json")
     return on_trace_ready
 
 
 def log_memories(objects_to_inspect: Dict[str, Any], logger: logging.Logger) -> None:
     for k, v in objects_to_inspect.items():
-        logger.info(f"{k} -> {get_size(v) / N_BYTES_IN_MB:.4f} MB")
+        logger.info(f"MEMORY USAGE: {k} -> {get_size(v) / N_BYTES_IN_MB:.4f} MB")
 
 
 class CodeBlock:
@@ -100,6 +100,7 @@ class CodeBlock:
         activities: List[ProfilerActivity] = field(default_factory=lambda: [ProfilerActivity.CPU, ProfilerActivity.CUDA])
         record_shapes: bool = True
         profile_memory: bool = True
+        with_stack: bool = True
 
     def __init__(
         self,
@@ -129,6 +130,7 @@ class CodeBlock:
                 activities=self.profile_kwargs.activities,
                 record_shapes=self.profile_kwargs.record_shapes,
                 profile_memory=self.profile_kwargs.profile_memory,
+                with_stack=self.profile_kwargs.with_stack,
                 schedule=self.profile_kwargs.schedule,
                 on_trace_ready=self.profile_kwargs.on_trace_ready,
             )

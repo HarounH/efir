@@ -184,7 +184,8 @@ if __name__ == "__main__":
         logger,
         profile=True,
         profile_kwargs=CodeBlock.ProfileKwargs(
-            on_trace_ready=get_on_trace_ready(f"training_loop")),
+            on_trace_ready=get_on_trace_ready(f"training_loop"),
+        ),
     ) as prof:
         for epoch in range(n_epochs):
             for batch_idx, (data, labels) in enumerate(tqdm(train_loader)):
