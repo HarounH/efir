@@ -23,4 +23,4 @@ TRAINING_LOOP:
   validation_frequency: 100
 LOSS_WEIGHTS:
   mse_loss: 1.0
-  regularization: 0.001
+  regularization: 0.00001

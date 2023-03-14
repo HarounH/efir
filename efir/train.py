@@ -99,6 +99,7 @@ def validate(
                     classes=[{"id": i, "name": x} for i, x in enumerate(labels.detach()[:viz_count].cpu().tolist())],  # type: ignore
                 ),
             }
+            # import pdb; pdb.set_trace()
             wandb.log(
                 {
                     **({k: v.detach().cpu().item() for k, v in losses.items()}),
@@ -188,7 +189,7 @@ if __name__ == "__main__":
         ),
     ) as prof:
         for epoch in range(n_epochs):
-            for batch_idx, (data, labels) in enumerate(tqdm(train_loader)):
+            for batch_idx, (data, labels) in enumerate((pbar := tqdm(train_loader))):
                 # Do something with the data
                 data = data.to(device)
                 outputs = model.losses(data)
@@ -229,6 +230,11 @@ if __name__ == "__main__":
                         "batch": batch_idx,
                         **log_kwargs,
                     }
+                )
+                pbar.set_description(
+                    f"[{epoch}:{batch_idx}]" + " ".join(
+                        f"{k}: {v.detach().cpu().item():.4f}" for k,v in losses.items()
+                    )
                 )
                 prof.step()
             ## Invoke validation

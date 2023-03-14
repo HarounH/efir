@@ -100,7 +100,7 @@ class CodeBlock:
         activities: List[ProfilerActivity] = field(default_factory=lambda: [ProfilerActivity.CPU, ProfilerActivity.CUDA])
         record_shapes: bool = True
         profile_memory: bool = True
-        with_stack: bool = True
+        with_stack: bool = False
 
     def __init__(
         self,
@@ -117,7 +117,7 @@ class CodeBlock:
         self._profiler = None
         self.objects_to_inspect = objects_to_inspect
 
-    def __enter__(self):
+    def __enter__(self) -> Optional[profile]:
         if self.objects_to_inspect is not None:
             log_memories(objects_to_inspect={f"start_{k}": v for k, v in self.objects_to_inspect.items()}, logger=logger)
         if self.profile:
