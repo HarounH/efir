@@ -1,0 +1,29 @@
+OUTPUT_DIR: "efir/results"
+DEVICE: "cuda"
+DATA:
+  DATASET: "mnist"
+  TRAIN_DATALOADER:
+    batch_size: 256
+  TEST_DATALOADER:
+    batch_size: 128
+MODEL:
+  type: "vae"
+  encoded_space_dim: 256
+  fc2_input_dim: 256
+  use_l1_loss: true
+  bn: true
+  leaky_relu: true
+OPTIMIZER:
+  type: "adam"
+  lr: 0.0005
+  weight_decay: 0.0
+enable_scheduler: True
+SCHEDULER:
+  type: "CosineAnnealingWarmRestarts"
+  T_0: 150
+TRAINING_LOOP:
+  n_epochs: 10
+  validation_frequency: 100
+LOSS_WEIGHTS:
+  l1_loss: 1.0
+  regularization: 0.0001

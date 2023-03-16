@@ -78,7 +78,7 @@ def validate(
     ) as prof:
         for batch_idx, (data, labels) in enumerate(test_loader):
             data = data.to(device)
-            outputs = model.losses(data)  # type: ignore
+            outputs = model(data)  # type: ignore
             losses = {
                 (f"{prefix}/" + loss_name): weight * outputs.get(loss_name)
                 for loss_name, weight in loss_weights.items()
@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     model = Registry.build_from_cfg(cfg.MODEL).to(device)
     print(model)
-    wandb.watch(model)
+    wandb.watch(model, log="all")
 
     optimizer = Registry.build_from_cfg(cfg.OPTIMIZER, params=model.parameters())
     if use_scheduler := cfg.enable_scheduler:
@@ -192,7 +192,7 @@ if __name__ == "__main__":
             for batch_idx, (data, labels) in enumerate((pbar := tqdm(train_loader))):
                 # Do something with the data
                 data = data.to(device)
-                outputs = model.losses(data)
+                outputs = model(data)
                 losses = {
                     loss_name: weight * outputs.get(loss_name)
                     for loss_name, weight in loss_weights.items()
