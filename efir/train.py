@@ -12,7 +12,7 @@ from yacs.config import CfgNode
 import os
 from efir.checkpointer import Checkpointer
 from tqdm import tqdm
-from typing import Optional, Callable
+from typing import List, Optional, Callable
 import random
 from torch.utils.data import Subset, DataLoader, Dataset
 from torch.profiler import profile,  record_function, ProfilerActivity
@@ -29,9 +29,11 @@ def validate(
     cfg_node: CfgNode,
     test_epoch: int,
     device: str,
+    include_targets: List[int],
     prefix: str = "test",
     profile: bool = False,
 ) -> float:
+    loss_weights = cfg_node.LOSS_WEIGHTS
     with CodeBlock(
         "initializing testing dataset and dataloader",
         logger,
@@ -124,7 +126,6 @@ if __name__ == "__main__":
     include_targets = args.include_targets
     cfg = load_config(args.config)
     device = cfg.DEVICE
-    output_dir = cfg.OUTPUT_DIR
     cfg_dict = cfg_node_to_dict(cfg)
     cfg_dict["include_targets"] = include_targets
     wandb.init(
@@ -136,6 +137,7 @@ if __name__ == "__main__":
         # TODO: set group
     )
     run_name = wandb.run.name  # type: ignore
+    output_dir = cfg.OUTPUT_DIR
     checkpointer = Checkpointer(os.path.join(output_dir, run_name))
     logger.info(f"Starting run with {run_name=}, and {checkpointer.dir=}")
 
@@ -240,15 +242,15 @@ if __name__ == "__main__":
             ## Invoke validation
             if epoch % validation_frequency == 0:
                 with CodeBlock(f"Validating on {epoch=}", logger):
-                    val_loss = validate(model, cfg, test_epoch=epoch, device=device, profile=False)
+                    val_loss = validate(model, cfg, include_targets=include_targets, test_epoch=epoch, device=device, profile=False)
                 with CodeBlock(f"Checkpointing on {epoch=}", logger):
                     checkpointer(model, epoch, {"val_loss": val_loss})
     # Invoke test
     with CodeBlock(f"Testing at the end", logger):
-        val_loss = validate(model, cfg, test_epoch=(n_epochs + 1), device=device, profile=True)
+        val_loss = validate(model, cfg, include_targets=include_targets, test_epoch=(n_epochs + 1), device=device, profile=True)
 
     with CodeBlock(f"Testing Unseen class at the end", logger):
-        val_loss = validate(model, cfg, test_epoch=(n_epochs + 1), device=device, prefix="unseen_test")
+        val_loss = validate(model, cfg, include_targets=include_targets, test_epoch=(n_epochs + 1), device=device, prefix="unseen_test")
 
     with CodeBlock(f"Checkpointing at the end", logger):
         checkpointer(model, (n_epochs + 1), {"val_loss": val_loss})

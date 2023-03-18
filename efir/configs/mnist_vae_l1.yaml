@@ -22,7 +22,7 @@ SCHEDULER:
   type: "CosineAnnealingWarmRestarts"
   T_0: 150
 TRAINING_LOOP:
-  n_epochs: 10
+  n_epochs: 20
   validation_frequency: 100
 LOSS_WEIGHTS:
   l1_loss: 1.0
